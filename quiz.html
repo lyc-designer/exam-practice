@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>东风汽车技能竞赛答题系统</title>
+<title>技能竞赛答题系统</title>
 <style>
 /* ============================================
-   东风技能竞赛答题系统 — 工业美学设计
+   技能竞赛答题系统 — 工业美学设计
    配色：深蓝+橙红+金属质感
    ============================================ */
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap');
@@ -737,7 +737,7 @@ body {
   <div class="header-brand">
     <div class="header-logo">⚡</div>
     <div>
-      <div class="header-title">东风技能竞赛</div>
+      <div class="header-title">技能竞赛</div>
       <div class="header-sub">题库答题系统</div>
     </div>
   </div>
@@ -760,7 +760,7 @@ body {
   <div id="screen-home" class="screen active">
     <div class="home-hero">
       <div class="home-badge">⚡ 2026 职工技能竞赛</div>
-      <h1 class="home-title">东风汽车集团<br><span>维修电工理论题库</span></h1>
+      <h1 class="home-title">技能竞赛<br><span>维修电工理论题库</span></h1>
       <p class="home-desc">精选 500 道维修电工题目，涵盖单选、多选、判断三大题型</p>
     </div>
 
@@ -792,6 +792,14 @@ body {
       <button class="btn btn-primary btn-block" onclick="startQuickQuiz('all')">
         <span class="icon">🚀</span> 综合练习（500题随机）
       </button>
+      <button class="btn btn-secondary btn-block" onclick="startSequentialQuiz()">
+        <span class="icon">📖</span> 顺序练习（按题号顺序）
+      </button>
+      <div id="seqResumeBanner" style="display:none;margin-bottom:8px;">
+        <button class="btn btn-block" onclick="resumeSequentialQuiz()" style="background:var(--green-dim);border:1px solid var(--green);color:var(--green);">
+          <span class="icon">▶️</span> 继续上次顺序练习（第<span id="seqResumeNum">?</span>题）
+        </button>
+      </div>
       <button class="btn btn-secondary btn-block" onclick="showModeSelector()">
         <span class="icon">🎯</span> 专项答题
       </button>
@@ -973,7 +981,7 @@ body {
 // ═══════════════════════════════════════════════════════
 let state = {
   currentScreen: 'home',
-  quizMode: null,          // 'all' | 'single' | 'multi' | 'judge' | 'custom'
+  quizMode: null,          // 'all' | 'single' | 'multi' | 'judge' | 'custom' | 'sequential'
   selectedTypes: [],        // for custom mode
   questions: [],            // current quiz questions
   currentIndex: 0,
@@ -987,7 +995,8 @@ let state = {
   selectedOptions: new Set(),
   history: [],
   wrongQuestions: [],      // all-time wrong
-  quizSessionWrong: []      // current session wrong
+  quizSessionWrong: [],     // current session wrong
+  seqProgress: null         // {currentIndex, answers, elapsedSeconds, quizSessionWrong} — 顺序练习断点续传
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1005,7 +1014,8 @@ function init() {
 function saveState() {
   localStorage.setItem('dfqc_quiz_state', JSON.stringify({
     history: state.history,
-    wrongQuestions: state.wrongQuestions
+    wrongQuestions: state.wrongQuestions,
+    seqProgress: state.seqProgress
   }));
 }
 function loadState() {
@@ -1015,6 +1025,7 @@ function loadState() {
       const data = JSON.parse(saved);
       state.history = data.history || [];
       state.wrongQuestions = data.wrongQuestions || [];
+      state.seqProgress = data.seqProgress || null;
     }
   } catch(e) {}
 }
@@ -1045,6 +1056,14 @@ function renderHome() {
   if (sessions.length > 0) {
     const avgRate = sessions.reduce((a, s) => a + s.score/s.total*100, 0) / sessions.length;
     document.getElementById('homeCorrect').textContent = avgRate.toFixed(0) + '%';
+  }
+  // 顺序练习断点续传提示
+  const resumeBanner = document.getElementById('seqResumeBanner');
+  if (state.seqProgress && state.seqProgress.currentIndex >= 0 && state.seqProgress.currentIndex < QUESTION_BANK.length) {
+    resumeBanner.style.display = '';
+    document.getElementById('seqResumeNum').textContent = state.seqProgress.currentIndex + 1;
+  } else {
+    resumeBanner.style.display = 'none';
   }
   renderRecentHistory();
 }
@@ -1085,11 +1104,11 @@ function renderRecentHistory() {
 
 function buildHistoryItem(h) {
   const modeLabel = {all:'综合模式',single:'单选题',multi:'多选题',judge:'判断题',custom:'专项答题'};
-  const iconClass = {all:'mixed-mode',single:'single-mode',multi:'multi-mode',judge:'judge-mode',custom:'mixed-mode'};
+  const iconClass = {all:'mixed-mode',single:'single-mode',multi:'multi-mode',judge:'judge-mode',custom:'mixed-mode',sequential:'mixed-mode'};
   const pct = h.total > 0 ? (h.score/h.total*100).toFixed(0) : 0;
   const date = new Date(h.date).toLocaleDateString('zh-CN', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
   const incompleteTag = h.incomplete ? '<span style="background:var(--yellow-dim);color:var(--yellow);border:1px solid var(--yellow);border-radius:8px;padding:1px 6px;font-size:10px;margin-left:4px;">未完成</span>' : '';
-  const modeIcon = h.mode==='all'?'🎯':h.mode==='single'?'1':h.mode==='multi'?'☑':'✓';
+  const modeIcon = h.mode==='all'?'🎯':h.mode==='single'?'1':h.mode==='multi'?'☑':h.mode==='judge'?'✓':h.mode==='sequential'?'📖':'🎯';
   return `<div class="history-item" onclick="viewHistoryDetail(${h.id})">
     <div class="history-icon ${iconClass[h.mode]||'mixed-mode'}">${modeIcon}</div>
     <div class="history-info">
@@ -1148,13 +1167,44 @@ function startQuickQuiz(mode) {
   startQuiz();
 }
 
+// ── 顺序练习（按题号顺序，支持断点续传）──
+function startSequentialQuiz() {
+  state.quizMode = 'sequential';
+  state.questions = [...QUESTION_BANK]; // 不打乱，保持原始顺序
+  state.seqProgress = null; // 清除断点，从头开始
+  saveState();
+  startQuiz();
+}
+
+function resumeSequentialQuiz() {
+  if (!state.seqProgress) return;
+  state.quizMode = 'sequential';
+  state.questions = [...QUESTION_BANK]; // 保持原始顺序
+  state.currentIndex = state.seqProgress.currentIndex || 0;
+  state.answers = state.seqProgress.answers || [];
+  state.quizSessionWrong = state.seqProgress.quizSessionWrong || [];
+  state.sessionStart = Date.now();
+  state.sessionId = Date.now();
+  state.elapsedSeconds = state.seqProgress.elapsedSeconds || 0;
+  navigate('quiz');
+  renderQuestion();
+  startTimer();
+}
+
 function startQuiz() {
   state.sessionId = Date.now();
-  state.currentIndex = 0;
-  state.answers = [];
-  state.quizSessionWrong = [];
-  state.sessionStart = Date.now();
-  state.elapsedSeconds = 0;
+  // 顺序练习且有断点：从断点续传；否则全部重置
+  if (state.quizMode === 'sequential' && state.seqProgress) {
+    state.currentIndex = state.seqProgress.currentIndex || 0;
+    state.answers = state.seqProgress.answers || [];
+    state.quizSessionWrong = state.seqProgress.quizSessionWrong || [];
+    state.elapsedSeconds = state.seqProgress.elapsedSeconds || 0;
+  } else {
+    state.currentIndex = 0;
+    state.answers = [];
+    state.quizSessionWrong = [];
+    state.elapsedSeconds = 0;
+  }
   navigate('quiz');
   renderQuestion();
   startTimer();
@@ -1436,6 +1486,12 @@ function nextQuestion() {
 function showResult() {
   clearInterval(state.timerInterval);
   
+  // 顺序练习完成后清除断点
+  if (state.quizMode === 'sequential') {
+    state.seqProgress = null;
+    saveState();
+  }
+  
   const correct = state.answers.filter(a => a.isCorrect === true).length;
   const wrong = state.answers.filter(a => a.isCorrect === false).length;
   const skipped = state.answers.filter(a => a.skipped).length;
@@ -1505,7 +1561,9 @@ function showResult() {
 
 function restartLastQuiz() {
   // Restart with same settings
-  if (state.quizMode === 'all') {
+  if (state.quizMode === 'sequential') {
+    startSequentialQuiz();
+  } else if (state.quizMode === 'all') {
     startQuickQuiz('all');
   } else if (state.quizMode === 'custom') {
     startCustomQuiz();
@@ -1530,6 +1588,17 @@ function exitQuiz() {
       });
       const answeredCount = state.answers.filter(a => !a.skipped).length;
       const correctCount = state.answers.filter(a => a.isCorrect === true).length;
+      
+      // 顺序练习：保存断点进度
+      if (state.quizMode === 'sequential') {
+        state.seqProgress = {
+          currentIndex: state.currentIndex,
+          answers: state.answers,
+          elapsedSeconds: state.elapsedSeconds,
+          quizSessionWrong: state.quizSessionWrong
+        };
+      }
+      
       const session = {
         id: state.sessionId,
         mode: state.quizMode,
@@ -1554,7 +1623,7 @@ function exitQuiz() {
       }
       saveState();
       updateHeaderStats();
-      showToast(`已保存本次练习（${answeredCount}题）`);
+      showToast(`已保存本次练习（${answeredCount}题${state.quizMode==='sequential'?'，下次可继续':''}）`);
     }
     navigate('home');
   } catch(e) {
@@ -1619,7 +1688,7 @@ function viewHistoryDetail(sessionId) {
   else if (pct >= 60) grade = '及格';
   else grade = '继续努力';
   document.getElementById('gradeText').textContent = grade;
-  const modeLabel = {all:'综合模式',single:'单选题',multi:'多选题',judge:'判断题',custom:'专项答题'};
+  const modeLabel = {all:'综合模式',single:'单选题',multi:'多选题',judge:'判断题',custom:'专项答题',sequential:'顺序练习'};
   document.getElementById('resultSubtitle').textContent = 
     `${modeLabel[session.mode]||'练习'} · 正确率 ${pct.toFixed(1)}% (${correct}/${total}) · 用时 ${session.duration}`;
   document.getElementById('statCorrect').textContent = session.correct;
@@ -1691,19 +1760,18 @@ function startWrongPractice() {
   state.questions = [...state.wrongQuestions];
   state.currentIndex = 0;
   state.answers = [];
+  state.quizSessionWrong = [];
+  // 注意：seqProgress 不清，保留顺序练习断点，用户可以随时回去继续
   state.userAnswer = null;
   state.confirmed = false;
   state.selectedOptions = new Set();
   state.sessionStart = Date.now();
   state.sessionId = 'wrong_' + Date.now();
   state.elapsedSeconds = 0;
-  state.quizSessionWrong = [];
   clearInterval(state.timerInterval);
-  state.timerInterval = setInterval(() => {
-    state.elapsedSeconds++;
-    document.getElementById('timer').textContent = formatTime(state.elapsedSeconds);
-  }, 1000);
   navigate('quiz');
+  renderQuestion();
+  startTimer();
 }
 
 function filterWrong(type, el) {
