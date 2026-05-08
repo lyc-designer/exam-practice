@@ -1193,11 +1193,16 @@ function resumeSequentialQuiz() {
 
 function startQuiz() {
   state.sessionId = Date.now();
-  if (state.quizMode !== 'sequential' || !state.seqProgress) {
+  // 顺序练习且有断点：从断点续传；否则全部重置
+  if (state.quizMode === 'sequential' && state.seqProgress) {
+    state.currentIndex = state.seqProgress.currentIndex || 0;
+    state.answers = state.seqProgress.answers || [];
+    state.quizSessionWrong = state.seqProgress.quizSessionWrong || [];
+    state.elapsedSeconds = state.seqProgress.elapsedSeconds || 0;
+  } else {
     state.currentIndex = 0;
     state.answers = [];
     state.quizSessionWrong = [];
-    state.sessionStart = Date.now();
     state.elapsedSeconds = 0;
   }
   navigate('quiz');
@@ -1755,19 +1760,18 @@ function startWrongPractice() {
   state.questions = [...state.wrongQuestions];
   state.currentIndex = 0;
   state.answers = [];
+  state.quizSessionWrong = [];
+  // 注意：seqProgress 不清，保留顺序练习断点，用户可以随时回去继续
   state.userAnswer = null;
   state.confirmed = false;
   state.selectedOptions = new Set();
   state.sessionStart = Date.now();
   state.sessionId = 'wrong_' + Date.now();
   state.elapsedSeconds = 0;
-  state.quizSessionWrong = [];
   clearInterval(state.timerInterval);
-  state.timerInterval = setInterval(() => {
-    state.elapsedSeconds++;
-    document.getElementById('timer').textContent = formatTime(state.elapsedSeconds);
-  }, 1000);
   navigate('quiz');
+  renderQuestion();
+  startTimer();
 }
 
 function filterWrong(type, el) {
